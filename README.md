@@ -163,6 +163,46 @@ That produces `installer\Output\DiskMapper-Setup-1.0.0.exe`.
 
 ---
 
+## Tracking who is using it
+
+Once a release is published, `stats.bat` shows how the download numbers are
+moving. It reads the public GitHub API, stores every reading locally, and
+renders the trend in the terminal:
+
+```powershell
+.\stats.bat                 # fetch, record, show the dashboard
+.\stats.bat --watch 300     # live, refreshing every 5 minutes
+.\stats.bat --history       # every reading ever taken
+.\stats.bat --csv out.csv   # export for a spreadsheet
+```
+
+```
+  METRIC                     NOW     24H   7 DAYS
+  -----------------------------------------------
+  Downloads                  184     +12      +57
+  Stars                        9      +1       +4
+```
+
+Because each reading is saved, the 24-hour and 7-day columns fill in on their
+own the more often you run it. The dashboard also prints a suggested next move
+based on where the download count actually is.
+
+**What this cannot tell you:** who downloaded the app. GitHub deliberately
+publishes only aggregate counts — no names, no emails, no IP addresses. That is
+true for every project on the platform, not just this one.
+
+Identifying individual users requires them to identify themselves — an account,
+a mailing-list signup or a licence key. Anonymous opt-in telemetry sits in
+between: it can report *how many* installs are active and which features get
+used, but never *who*.
+
+If you ever add telemetry, it must be opt-in with a visible prompt, switchable
+off at any time, and documented in a privacy policy — India's DPDP Act and the
+GDPR both require it. Send counters only. Never send file names, folder paths
+or anything else read off a user's disk.
+
+---
+
 ## Project layout
 
 ```
@@ -170,12 +210,15 @@ DiskMapper/
 ├── main.py                 entry point + CLI flags
 ├── run.bat                 double-click launcher (source)
 ├── build.bat               builds dist\DiskMapper.exe
+├── stats.bat               release analytics dashboard
 ├── selftest.py             21 core checks
 ├── selftest_features.py    39 engine checks
 ├── selftest_ui.py          33 GUI checks
+├── selftest_stats.py       57 analytics checks
 ├── assets/diskmapper.ico   generated app icon
 ├── tools/
 │   ├── make_icon.py        icon generator (stdlib only, no Pillow)
+│   ├── stats.py            GitHub release analytics
 │   └── version_info.txt    Windows version resource
 ├── installer/
 │   └── DiskMapper.iss      Inno Setup installer script
@@ -190,17 +233,19 @@ DiskMapper/
     └── ui.py               blueprint canvas, four views, lenses, export
 ```
 
-Scan history lives in `%LOCALAPPDATA%\DiskMapper\history.db`.
+Scan history lives in `%LOCALAPPDATA%\DiskMapper\history.db`, and download
+readings in `%LOCALAPPDATA%\DiskMapper\stats.db`.
 
 ## Verify
 
 ```powershell
-python selftest.py ; python selftest_features.py ; python selftest_ui.py
+python selftest.py ; python selftest_features.py ; python selftest_ui.py ; python selftest_stats.py
 ```
 
-93 checks covering layout maths (area conservation, bounds, proportionality),
+150 checks covering layout maths (area conservation, bounds, proportionality),
 size roll-up, cancellation, classification, query parsing, junk rules, duplicate
-detection, delete guard rails, snapshot diffing, and every UI view.
+detection, delete guard rails, snapshot diffing, every UI view, and the
+analytics storage, deltas and rendering.
 
 ---
 
