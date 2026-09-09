@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec
+
+# Build output (regenerate with build.bat - never commit binaries)
+build/
+dist/
+installer/Output/
+assets/preview.png
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# DiskMapper runtime data (scan history is machine-local, never commit it)
+*.db
+*.db-wal
+*.db-shm
+history.db
+diskmap_*.csv
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
