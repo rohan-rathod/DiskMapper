@@ -4,10 +4,10 @@
 ; in the Inno Setup Compiler and press F9, or run:
 ;     iscc installer\DiskMapper.iss
 ;
-; Output: installer\Output\DiskMapper-Setup-1.0.0.exe
+; Output: installer\Output\DiskMapper-Setup-1.1.0.exe
 
 #define AppName        "DiskMapper"
-#define AppVersion     "1.0.0"
+#define AppVersion     "1.1.0"
 #define AppPublisher   "Rohan Rathod"
 #define AppExeName     "DiskMapper.exe"
 
