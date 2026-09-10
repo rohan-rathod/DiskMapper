@@ -8,6 +8,7 @@ delta and rendering logic is verified deterministically.
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 import tempfile
@@ -242,6 +243,72 @@ def test_cli() -> None:
         check("csv flag writes the file", os.path.exists(dest))
 
 
+def test_encoding_fallback() -> None:
+    print("\nConsole encoding fallback")
+    bars = stats.sparkline([0, 3, 7])
+    check("sparkline uses block characters by default",
+          any(c in stats.SPARK for c in bars), bars)
+
+    downgraded = stats._ascii_fallback(bars)
+    check("fallback removes every block character",
+          not any(c in stats.SPARK for c in downgraded), downgraded)
+    check("fallback output is pure ascii",
+          all(ord(c) < 128 for c in downgraded), downgraded)
+    check("fallback preserves the bar count",
+          len(downgraded) == len(bars), f"{len(downgraded)} vs {len(bars)}")
+    check("fallback keeps surrounding text intact",
+          stats._ascii_fallback("Downloads " + bars).startswith("Downloads "))
+    check("ascii input passes through unchanged",
+          stats._ascii_fallback("plain text 123") == "plain text 123")
+    check("fallback charset matches the block charset in length",
+          len(stats.SPARK_ASCII) == len(stats.SPARK))
+
+    # A cp1252 console cannot encode the block characters; emit() must not
+    # raise, which is the bug this guards against.
+    class NarrowStream(io.TextIOBase):
+        encoding = "cp1252"
+
+        def __init__(self) -> None:
+            self.text = ""
+
+        def write(self, s: str) -> int:
+            s.encode("cp1252")  # raises UnicodeEncodeError on block chars
+            self.text += s
+            return len(s)
+
+    narrow = NarrowStream()
+    real = sys.stdout
+    sys.stdout = narrow  # type: ignore[assignment]
+    try:
+        stats.emit("Downloads " + bars)
+        ok = True
+    except UnicodeEncodeError:
+        ok = False
+    finally:
+        sys.stdout = real
+    check("emit survives a cp1252 console", ok)
+    check("emit still wrote the line", "Downloads" in narrow.text, narrow.text)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "enc.db")
+        store = stats.StatsStore(db)
+        store.record("a/b", snap(48, 1))
+        store.record("a/b", snap(0, 9))
+        store.close()
+        narrow2 = NarrowStream()
+        real = sys.stdout
+        sys.stdout = narrow2  # type: ignore[assignment]
+        try:
+            rc = stats.main(["--repo", "a/b", "--db", db, "--offline"])
+            ok = True
+        except UnicodeEncodeError:
+            rc, ok = -1, False
+        finally:
+            sys.stdout = real
+        check("dashboard with a sparkline renders on cp1252", ok)
+        check("cp1252 run exits cleanly", rc == 0, str(rc))
+
+
 def main() -> int:
     print("DiskMapper analytics self-test")
     test_sparkline()
@@ -250,6 +317,7 @@ def main() -> int:
     test_deltas()
     test_dashboard()
     test_history_and_csv()
+    test_encoding_fallback()
     test_cli()
     total = PASS + FAIL
     print(f"\n{PASS}/{total} checks passed")

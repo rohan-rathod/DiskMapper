@@ -41,6 +41,9 @@ USER_AGENT = "DiskMapper-Stats/1.0"
 TIMEOUT = 20
 
 SPARK = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+# Fallback for consoles that cannot encode the block characters (the classic
+# Windows console defaults to cp1252, which raises UnicodeEncodeError).
+SPARK_ASCII = "_.-=+*#@"
 
 
 def db_path() -> Path:
@@ -320,6 +323,20 @@ def _age(ts: str) -> str:
     return f"{secs / 86400:.0f} days ago"
 
 
+def _ascii_fallback(text: str) -> str:
+    """Downgrade block characters so any console can render the output."""
+    table = str.maketrans(dict(zip(SPARK, SPARK_ASCII)))
+    return text.translate(table).encode("ascii", "replace").decode("ascii")
+
+
+def emit(text: str) -> None:
+    """Print text, degrading gracefully on consoles with a narrow codec."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        print(_ascii_fallback(text))
+
+
 def dashboard(repo: str, store: StatsStore) -> str:
     rows = store.history(repo)
     if not rows:
@@ -447,6 +464,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", help="override database location")
     args = p.parse_args(argv)
 
+    # Prefer real UTF-8 output; emit() covers consoles that refuse it.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    except (AttributeError, OSError, ValueError):
+        pass
+
     store = StatsStore(args.db)
     try:
         if args.csv:
@@ -455,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.history:
-            print(history_table(args.repo, store))
+            emit(history_table(args.repo, store))
             return 0
 
         def refresh() -> bool:
@@ -485,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
                 while True:
                     refresh()
                     os.system("cls" if os.name == "nt" else "clear")
-                    print(dashboard(args.repo, store))
+                    emit(dashboard(args.repo, store))
                     print(f"\n  refreshing every {interval}s - Ctrl+C to stop")
                     time.sleep(interval)
             except KeyboardInterrupt:
@@ -493,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         refresh()
-        print(dashboard(args.repo, store))
+        emit(dashboard(args.repo, store))
         return 0
     finally:
         store.close()

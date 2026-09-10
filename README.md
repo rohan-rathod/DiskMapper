@@ -1,14 +1,15 @@
 # DiskMapper — Disk Space Blueprint
 
 A desktop app that draws your PC's storage as a **blueprint floor plan**, then goes
-four steps further than every other disk visualiser: it remembers what your disk
+several steps further than every other disk visualiser: it remembers what your disk
 looked like last week, tells you what's safe to delete, answers questions in plain
-English, and recolours the whole map by type, risk or age.
+English, recolours the whole map by type, risk or age, and carries its own
+reviews page inside the product.
 
 ![style](https://img.shields.io/badge/UI-Blueprint-59E3FF)
 ![python](https://img.shields.io/badge/python-3.8%2B-blue)
 ![deps](https://img.shields.io/badge/dependencies-none-success)
-![tests](https://img.shields.io/badge/tests-93%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-276%20passing-brightgreen)
 
 ---
 
@@ -25,7 +26,7 @@ Zero third-party packages — standard library only.
 
 ---
 
-## The four views
+## The five views
 
 Switch with the **VIEW** row at the top.
 
@@ -71,6 +72,36 @@ folders bigger than 2gb
 
 It shows you exactly how it interpreted your question, so you always know what
 you're looking at.
+
+### 5. Community — adoption and reviews, inside the app
+
+An App Store style page built into the product: how many people have downloaded
+it, the average rating, the star distribution, and every review, rendered as
+cards. Buttons open a pre-filled review or bug report on GitHub in your browser.
+
+Three design decisions worth calling out:
+
+**Small numbers are framed, not hidden.** A "6 downloads" banner reads as a
+failure signal to someone opening the app for the first time. Below 25
+downloads the same honest number is presented as *"Early access — 6 downloads.
+You are among the first to use DiskMapper."* Nothing is fabricated or
+concealed; only the framing changes, and it drops away automatically once the
+count can stand on its own.
+
+**Reviews live on GitHub, not in a database.** Any issue labelled `review`
+becomes a card. The rating is parsed from a `Rating: 4` line, `4/5`, `4 stars`
+or a run of ★ characters. That means no backend to run, no moderation queue to
+staff, no personal data held by the app, and every review is publicly
+verifiable rather than something the author could quietly edit.
+
+**The network is opt-in by navigation.** This is the only view that touches the
+internet, and only while it is open — nothing is fetched at startup. Reviews and
+counts are cached locally, so the page still renders offline with a visible
+"showing the last saved copy" notice rather than an error. No information about
+your disk is ever transmitted.
+
+The header also doubles as an update check: if a newer release exists, a green
+chip links straight to it.
 
 ---
 
@@ -212,9 +243,10 @@ DiskMapper/
 ├── build.bat               builds dist\DiskMapper.exe
 ├── stats.bat               release analytics dashboard
 ├── selftest.py             21 core checks
-├── selftest_features.py    39 engine checks
+├── selftest_features.py    44 engine checks
 ├── selftest_ui.py          33 GUI checks
-├── selftest_stats.py       57 analytics checks
+├── selftest_stats.py       68 analytics checks
+├── selftest_community.py   110 community checks
 ├── assets/diskmapper.ico   generated app icon
 ├── tools/
 │   ├── make_icon.py        icon generator (stdlib only, no Pillow)
@@ -230,22 +262,25 @@ DiskMapper/
     ├── storage.py          SQLite scan history + delta engine
     ├── reclaim.py          junk rules, duplicate hashing, safe deleter
     ├── query.py            natural-language → structured query compiler
-    └── ui.py               blueprint canvas, four views, lenses, export
+    ├── community.py        downloads, reviews, update check, offline cache
+    └── ui.py               blueprint canvas, five views, lenses, export
 ```
 
-Scan history lives in `%LOCALAPPDATA%\DiskMapper\history.db`, and download
-readings in `%LOCALAPPDATA%\DiskMapper\stats.db`.
+Scan history lives in `%LOCALAPPDATA%\DiskMapper\history.db`, download
+readings in `%LOCALAPPDATA%\DiskMapper\stats.db`, and the cached community
+payload in `%LOCALAPPDATA%\DiskMapper\community.db`.
 
 ## Verify
 
 ```powershell
-python selftest.py ; python selftest_features.py ; python selftest_ui.py ; python selftest_stats.py
+python selftest.py ; python selftest_features.py ; python selftest_ui.py ; python selftest_stats.py ; python selftest_community.py
 ```
 
-150 checks covering layout maths (area conservation, bounds, proportionality),
+276 checks covering layout maths (area conservation, bounds, proportionality),
 size roll-up, cancellation, classification, query parsing, junk rules, duplicate
-detection, delete guard rails, snapshot diffing, every UI view, and the
-analytics storage, deltas and rendering.
+detection, delete guard rails, snapshot diffing, every UI view, the analytics
+storage and deltas, and the community rating parser, version comparison,
+offline cache and every Community view state.
 
 ---
 

@@ -9,9 +9,12 @@ import subprocess
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, messagebox, ttk
 from typing import Dict, List, Optional, Tuple
 
+from . import __version__
+from . import community as comm
 from . import query as nlq
 from .categories import (AGE_BUCKETS, age_bucket, categorize, category_color,
                          classify_risk, days_old, risk_color)
@@ -35,6 +38,9 @@ PANEL = "#0A2340"
 WARN = "#FFB454"
 GOOD = "#3FD68C"
 BAD = "#FF6B6B"
+CARD = "#0E3357"
+CARD_EDGE = "#1A5288"
+STAR = "#FFC65C"
 
 BLOCK_COLORS = [
     "#1D6FA5", "#1F8A70", "#8C5BB0", "#B5652F", "#2E86AB",
@@ -173,6 +179,23 @@ class DiskMapperApp(tk.Tk):
         style.configure("Blue.TEntry", fieldbackground="#14406B", foreground=INK,
                         insertcolor=ACCENT, borderwidth=0)
 
+        # ---- Community view: elevated cards on the deep background --------
+        style.configure("Card.TFrame", background=CARD)
+        style.configure("Card.TLabel", background=CARD, foreground=INK)
+        style.configure("CardDim.TLabel", background=CARD, foreground=INK_DIM)
+        style.configure("CardHero.TLabel", background=CARD, foreground=ACCENT,
+                        font=("Segoe UI", 26, "bold"))
+        style.configure("CardMetric.TLabel", background=CARD, foreground=INK,
+                        font=("Segoe UI", 21, "bold"))
+        style.configure("CardLabel.TLabel", background=CARD, foreground=INK_DIM,
+                        font=("Segoe UI", 8, "bold"))
+        style.configure("CardTitle.TLabel", background=CARD, foreground=INK,
+                        font=("Segoe UI", 11, "bold"))
+        style.configure("CardStars.TLabel", background=CARD, foreground=STAR,
+                        font=("Segoe UI", 13))
+        style.configure("SectionHead.TLabel", background=BG_DEEP,
+                        foreground=INK_DIM, font=("Segoe UI", 9, "bold"))
+
     def _build_toolbar(self) -> None:
         bar = ttk.Frame(self, style="Blue.TFrame", padding=(12, 9, 12, 4))
         bar.pack(side=tk.TOP, fill=tk.X)
@@ -222,7 +245,8 @@ class DiskMapperApp(tk.Tk):
                   font=("Consolas", 9, "bold")).pack(side=tk.LEFT, padx=(0, 8))
         self.view_var = tk.StringVar(value="map")
         for label, value in (("Blueprint", "map"), ("Growth", "growth"),
-                             ("Reclaim", "reclaim"), ("Ask", "ask")):
+                             ("Reclaim", "reclaim"), ("Ask", "ask"),
+                             ("Community", "community")):
             ttk.Radiobutton(bar, text=label, value=value, variable=self.view_var,
                             style="Blue.TRadiobutton",
                             command=self._on_view_change).pack(side=tk.LEFT, padx=(0, 10))
@@ -262,6 +286,7 @@ class DiskMapperApp(tk.Tk):
 
         self._build_reclaim_pane()
         self._build_ask_pane()
+        self._build_community_pane()
         self._build_sidebar(body)
 
     def _build_reclaim_pane(self) -> None:
@@ -356,6 +381,324 @@ class DiskMapperApp(tk.Tk):
                          style="DimDeep.TLabel", font=("Segoe UI", 8))
         hint.pack(anchor="w", pady=(6, 0))
 
+    # ==================================================================
+    # community view
+    # ==================================================================
+    def _build_community_pane(self) -> None:
+        """Scrollable card layout: adoption, ratings, reviews, actions."""
+        self.community_frame = ttk.Frame(self.stage, style="Blue.TFrame")
+        self.community_data: Optional[comm.Community] = None
+        self.community_loading = False
+
+        wrap = ttk.Frame(self.community_frame, style="Blue.TFrame")
+        wrap.pack(fill=tk.BOTH, expand=True)
+
+        self.community_canvas = tk.Canvas(wrap, bg=BG_DEEP, highlightthickness=0,
+                                          bd=0)
+        bar = ttk.Scrollbar(wrap, orient="vertical",
+                            command=self.community_canvas.yview)
+        self.community_canvas.configure(yscrollcommand=bar.set)
+        bar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.community_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.community_inner = ttk.Frame(self.community_canvas,
+                                         style="Blue.TFrame", padding=(4, 4, 14, 20))
+        self._community_win = self.community_canvas.create_window(
+            (0, 0), window=self.community_inner, anchor="nw")
+
+        def _resize(_e=None) -> None:
+            self.community_canvas.configure(
+                scrollregion=self.community_canvas.bbox("all"))
+            self.community_canvas.itemconfigure(
+                self._community_win, width=self.community_canvas.winfo_width())
+
+        self.community_inner.bind("<Configure>", _resize)
+        self.community_canvas.bind("<Configure>", _resize)
+        self.community_canvas.bind(
+            "<MouseWheel>",
+            lambda e: self.community_canvas.yview_scroll(
+                int(-e.delta / 120), "units"))
+
+    # ---- small building blocks ---------------------------------------
+
+    def _card(self, parent, **pack) -> ttk.Frame:
+        """An elevated surface with a hairline edge, Material-style."""
+        edge = tk.Frame(parent, background=CARD_EDGE)
+        edge.pack(fill=pack.pop("fill", tk.X), expand=pack.pop("expand", False),
+                  **pack)
+        inner = ttk.Frame(edge, style="Card.TFrame", padding=(16, 13))
+        inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        return inner
+
+    def _section(self, text: str) -> None:
+        ttk.Label(self.community_inner, text=text.upper(),
+                  style="SectionHead.TLabel").pack(anchor="w", pady=(18, 6))
+
+    def _chip(self, parent, text: str, fg: str, bg: str) -> tk.Label:
+        chip = tk.Label(parent, text=text, foreground=fg, background=bg,
+                        font=("Segoe UI", 8, "bold"), padx=8, pady=2)
+        return chip
+
+    def _avatar(self, parent, letter: str) -> tk.Canvas:
+        size = 34
+        cv = tk.Canvas(parent, width=size, height=size, bg=CARD,
+                       highlightthickness=0, bd=0)
+        cv.create_oval(1, 1, size - 1, size - 1, fill="#1D5C96", outline="")
+        cv.create_text(size / 2, size / 2 + 1, text=letter, fill=INK,
+                       font=("Segoe UI", 13, "bold"))
+        return cv
+
+    def _clear_community(self) -> None:
+        for child in self.community_inner.winfo_children():
+            child.destroy()
+
+    # ---- loading -----------------------------------------------------
+
+    def refresh_community(self) -> None:
+        if self.community_loading:
+            return
+        self.community_loading = True
+        self._clear_community()
+        card = self._card(self.community_inner, pady=(10, 0))
+        ttk.Label(card, text="Loading community activity...",
+                  style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(card, text="Reading public download and review counts "
+                             "from GitHub.",
+                  style="CardDim.TLabel", font=("Segoe UI", 9)).pack(
+            anchor="w", pady=(3, 0))
+
+        def worker() -> None:
+            data = comm.load(comm.REPO, __version__)
+            self.after(0, self._community_loaded, data)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _community_loaded(self, data: "comm.Community") -> None:
+        self.community_loading = False
+        self.community_data = data
+        self._render_community()
+
+    # ---- rendering ---------------------------------------------------
+
+    def _render_community(self) -> None:
+        data = self.community_data
+        self._clear_community()
+        if data is None:
+            return
+
+        self._render_header(data)
+        if data.error:
+            self._render_notice(data)
+        self._render_adoption(data)
+        self._render_rating(data)
+        self._render_actions(data)
+        self._render_reviews(data)
+        self._render_footer(data)
+        self.community_canvas.yview_moveto(0)
+
+    def _render_header(self, data: "comm.Community") -> None:
+        card = self._card(self.community_inner, pady=(10, 0))
+        row = ttk.Frame(card, style="Card.TFrame")
+        row.pack(fill=tk.X)
+
+        left = ttk.Frame(row, style="Card.TFrame")
+        left.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(left, text="DiskMapper", style="CardHero.TLabel").pack(anchor="w")
+        ttk.Label(left, text="Disk space blueprint for Windows  -  MIT licensed",
+                  style="CardDim.TLabel", font=("Segoe UI", 9)).pack(anchor="w")
+
+        right = ttk.Frame(row, style="Card.TFrame")
+        right.pack(side=tk.RIGHT)
+        ttk.Label(right, text=f"Version {__version__}",
+                  style="Card.TLabel", font=("Segoe UI", 9)).pack(anchor="e")
+        if data.update_available:
+            chip = self._chip(right, f"Update available - {data.latest_version}",
+                              "#0A2A1C", GOOD)
+            chip.pack(anchor="e", pady=(5, 0))
+            chip.bind("<Button-1>", lambda _e: webbrowser.open(
+                f"https://github.com/{data.repo}/releases/latest"))
+            chip.configure(cursor="hand2")
+        elif data.latest_version:
+            self._chip(right, "Up to date", INK_DIM, "#123B63").pack(
+                anchor="e", pady=(5, 0))
+
+    def _render_notice(self, data: "comm.Community") -> None:
+        card = self._card(self.community_inner, pady=(10, 0))
+        headline = ("Showing the last saved copy" if data.from_cache
+                    else "Could not reach GitHub")
+        ttk.Label(card, text=headline, style="CardTitle.TLabel").pack(anchor="w")
+        detail = data.error
+        if data.from_cache and data.fetched_at:
+            detail += f"  Saved {data.fetched_at.replace('T', ' ')[:16]} UTC."
+        ttk.Label(card, text=detail, style="CardDim.TLabel",
+                  font=("Segoe UI", 9), wraplength=760, justify="left").pack(
+            anchor="w", pady=(3, 0))
+
+    def _render_adoption(self, data: "comm.Community") -> None:
+        self._section("Adoption")
+        card = self._card(self.community_inner)
+
+        headline, sub = comm.adoption_line(data.downloads)
+        ttk.Label(card, text=headline, style="CardMetric.TLabel").pack(anchor="w")
+        ttk.Label(card, text=sub, style="CardDim.TLabel", font=("Segoe UI", 9),
+                  wraplength=740, justify="left").pack(anchor="w", pady=(2, 12))
+
+        row = ttk.Frame(card, style="Card.TFrame")
+        row.pack(fill=tk.X)
+        rated = len(data.rated)
+        avg = f"{data.average_rating:.1f}" if rated else "-"
+        for label, value in (("DOWNLOADS", str(data.downloads)),
+                             ("GITHUB STARS", str(data.stars)),
+                             ("REVIEWS", str(len(data.reviews))),
+                             ("AVERAGE RATING", avg)):
+            cell = ttk.Frame(row, style="Card.TFrame")
+            cell.pack(side=tk.LEFT, padx=(0, 34))
+            ttk.Label(cell, text=value, style="CardMetric.TLabel").pack(anchor="w")
+            ttk.Label(cell, text=label, style="CardLabel.TLabel").pack(anchor="w")
+
+    def _render_rating(self, data: "comm.Community") -> None:
+        self._section("Ratings")
+        card = self._card(self.community_inner)
+        rated = data.rated
+
+        if not rated:
+            ttk.Label(card, text="No ratings yet",
+                      style="CardTitle.TLabel").pack(anchor="w")
+            ttk.Label(card,
+                      text="The first review is the one everyone else reads. "
+                           "If DiskMapper found something useful on your disk, "
+                           "say so below.",
+                      style="CardDim.TLabel", font=("Segoe UI", 9),
+                      wraplength=740, justify="left").pack(anchor="w", pady=(3, 0))
+            return
+
+        row = ttk.Frame(card, style="Card.TFrame")
+        row.pack(fill=tk.X)
+
+        left = ttk.Frame(row, style="Card.TFrame")
+        left.pack(side=tk.LEFT, padx=(0, 30))
+        ttk.Label(left, text=f"{data.average_rating:.1f}",
+                  style="CardHero.TLabel").pack(anchor="w")
+        ttk.Label(left, text=data.stars_display(),
+                  style="CardStars.TLabel").pack(anchor="w")
+        ttk.Label(left, text=comm.rating_line(data),
+                  style="CardLabel.TLabel").pack(anchor="w", pady=(2, 0))
+
+        bars = ttk.Frame(row, style="Card.TFrame")
+        bars.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        dist = data.distribution
+        peak = max(dist.values()) or 1
+        for star in (5, 4, 3, 2, 1):
+            line = ttk.Frame(bars, style="Card.TFrame")
+            line.pack(fill=tk.X, pady=1)
+            ttk.Label(line, text=str(star), style="CardDim.TLabel",
+                      font=("Segoe UI", 9), width=2).pack(side=tk.LEFT)
+            track = tk.Canvas(line, height=9, bg="#123B63",
+                              highlightthickness=0, bd=0)
+            track.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8))
+            count = dist[star]
+            track.bind(
+                "<Configure>",
+                lambda e, c=count, t=track: (
+                    t.delete("bar"),
+                    t.create_rectangle(
+                        0, 0, max(0, e.width * c / peak), 9,
+                        fill=STAR, outline="", tags="bar")))
+            ttk.Label(line, text=str(count), style="CardDim.TLabel",
+                      font=("Segoe UI", 9), width=3).pack(side=tk.LEFT)
+
+    def _render_actions(self, data: "comm.Community") -> None:
+        self._section("Your turn")
+        card = self._card(self.community_inner)
+        ttk.Label(card, text="Tell us what you think",
+                  style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(card,
+                  text="Reviews open in your browser on GitHub, so nothing is "
+                       "collected by the app itself. A free GitHub account is "
+                       "needed to post.",
+                  style="CardDim.TLabel", font=("Segoe UI", 9),
+                  wraplength=740, justify="left").pack(anchor="w", pady=(3, 11))
+
+        row = ttk.Frame(card, style="Card.TFrame")
+        row.pack(anchor="w")
+        ttk.Button(row, text="Write a review", style="Go.TButton",
+                   command=lambda: webbrowser.open(
+                       comm.review_url(data.repo, __version__))
+                   ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(row, text="Report a problem", style="Blue.TButton",
+                   command=lambda: webbrowser.open(
+                       comm.issue_url(data.repo, __version__))
+                   ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(row, text="Star on GitHub", style="Blue.TButton",
+                   command=lambda: webbrowser.open(
+                       f"https://github.com/{data.repo}")
+                   ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(row, text="Refresh", style="Blue.TButton",
+                   command=self.refresh_community).pack(side=tk.LEFT)
+
+    def _render_reviews(self, data: "comm.Community") -> None:
+        self._section(f"Reviews ({len(data.reviews)})")
+        if not data.reviews:
+            card = self._card(self.community_inner)
+            ttk.Label(card, text="Nothing here yet",
+                      style="CardTitle.TLabel").pack(anchor="w")
+            ttk.Label(card,
+                      text="Reviews posted on GitHub appear here automatically, "
+                           "for everyone running DiskMapper.",
+                      style="CardDim.TLabel", font=("Segoe UI", 9),
+                      wraplength=740, justify="left").pack(anchor="w", pady=(3, 0))
+            return
+
+        for review in data.reviews:
+            card = self._card(self.community_inner, pady=(0, 8))
+            head = ttk.Frame(card, style="Card.TFrame")
+            head.pack(fill=tk.X)
+            self._avatar(head, review.initial).pack(side=tk.LEFT, padx=(0, 11))
+
+            who = ttk.Frame(head, style="Card.TFrame")
+            who.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            ttk.Label(who, text=review.author,
+                      style="CardTitle.TLabel").pack(anchor="w")
+            meta = ttk.Frame(who, style="Card.TFrame")
+            meta.pack(anchor="w")
+            if review.rating:
+                ttk.Label(meta, text=review.stars,
+                          style="CardStars.TLabel").pack(side=tk.LEFT,
+                                                         padx=(0, 8))
+            ttk.Label(meta, text=review.created, style="CardDim.TLabel",
+                      font=("Segoe UI", 9)).pack(side=tk.LEFT)
+
+            if review.url:
+                link = ttk.Label(head, text="Open on GitHub",
+                                 style="CardDim.TLabel", font=("Segoe UI", 9))
+                link.pack(side=tk.RIGHT)
+                link.configure(cursor="hand2")
+                link.bind("<Button-1>",
+                          lambda _e, u=review.url: webbrowser.open(u))
+
+            if review.title:
+                ttk.Label(card, text=review.title, style="Card.TLabel",
+                          font=("Segoe UI", 10, "bold"), wraplength=740,
+                          justify="left").pack(anchor="w", pady=(9, 0))
+            if review.body:
+                body = review.body
+                if len(body) > 700:
+                    body = body[:700].rstrip() + "..."
+                ttk.Label(card, text=body, style="CardDim.TLabel",
+                          font=("Segoe UI", 9), wraplength=740,
+                          justify="left").pack(anchor="w", pady=(4, 0))
+
+    def _render_footer(self, data: "comm.Community") -> None:
+        when = data.fetched_at.replace("T", " ")[:16]
+        source = "last saved copy" if data.from_cache else "live from GitHub"
+        ttk.Label(self.community_inner,
+                  text=f"{source}  -  {when} UTC  -  this view is the only part "
+                       "of DiskMapper that uses the network, and only while it "
+                       "is open. No information about your disk ever leaves "
+                       "this machine.",
+                  style="DimDeep.TLabel", font=("Segoe UI", 8),
+                  wraplength=760, justify="left").pack(anchor="w", pady=(16, 0))
+
     def _build_sidebar(self, parent) -> None:
         self.sidebar = ttk.Notebook(parent, style="Blue.TNotebook", width=340)
         self.sidebar.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
@@ -425,7 +768,8 @@ class DiskMapperApp(tk.Tk):
     # ==================================================================
     def _on_view_change(self) -> None:
         self.view = self.view_var.get()
-        for widget in (self.canvas, self.reclaim_frame, self.ask_frame):
+        for widget in (self.canvas, self.reclaim_frame, self.ask_frame,
+                       self.community_frame):
             widget.pack_forget()
         if self.view in ("map", "growth"):
             self.canvas.pack(fill=tk.BOTH, expand=True)
@@ -436,6 +780,10 @@ class DiskMapperApp(tk.Tk):
             self.render()
         elif self.view == "reclaim":
             self.reclaim_frame.pack(fill=tk.BOTH, expand=True)
+        elif self.view == "community":
+            self.community_frame.pack(fill=tk.BOTH, expand=True)
+            if self.community_data is None and not self.community_loading:
+                self.refresh_community()
         else:
             self.ask_frame.pack(fill=tk.BOTH, expand=True)
             self.ask_entry.focus_set()

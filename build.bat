@@ -12,7 +12,8 @@ python tools\make_icon.py || goto :error
 echo [2/3] Running self-tests...
 python selftest.py >nul || goto :error
 python selftest_features.py >nul || goto :error
-echo       core + feature checks passed.
+python selftest_stats.py >nul || goto :error
+echo       core + feature + analytics checks passed.
 
 echo [3/3] Building executable...
 python -m PyInstaller --noconfirm --onefile --windowed ^
